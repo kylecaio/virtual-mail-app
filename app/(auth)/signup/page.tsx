@@ -14,7 +14,7 @@ export default function SignupPage() {
     e.preventDefault();
     setBusy(true); setMsg(null);
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -22,8 +22,11 @@ export default function SignupPage() {
         emailRedirectTo: `${window.location.origin}/auth/confirm?next=/auth/post-login`,
       },
     });
+    if (error) { setBusy(false); setMsg(error.message); return; }
+    // If email confirmation is off, signUp returns a live session → go straight in.
+    if (data.session) { window.location.assign("/auth/post-login"); return; }
     setBusy(false);
-    setMsg(error ? error.message : "Account created. Check your email to confirm, then sign in.");
+    setMsg("Account created. Check your email to confirm, then sign in.");
   }
 
   return (

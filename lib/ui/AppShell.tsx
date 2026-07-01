@@ -18,6 +18,7 @@ export function AppShell({ profile, children }: { profile: Profile; children: Re
             <nav className="flex gap-1 text-sm">
               <Link href="/dashboard" className="rounded-theme px-2.5 py-1 text-inkMuted hover:bg-surfaceAlt">Portal</Link>
               {isStaff && <Link href="/ops" className="rounded-theme px-2.5 py-1 text-inkMuted hover:bg-surfaceAlt">Ops</Link>}
+              {isStaff && <Link href="/ops/intake" className="rounded-theme px-2.5 py-1 text-inkMuted hover:bg-surfaceAlt">Intake</Link>}
               {profile.role === "admin" && <Link href="/admin" className="rounded-theme px-2.5 py-1 text-inkMuted hover:bg-surfaceAlt">Admin</Link>}
             </nav>
           </div>
