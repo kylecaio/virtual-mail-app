@@ -244,12 +244,19 @@ export async function chargeAndFulfil(input: ChargeInput): Promise<ChargeResult>
   if (customer?.email) {
     const event = EVENT_MAP[input.action];
     const base = process.env.NEXT_PUBLIC_SITE_URL ?? "https://big-oakland-mail.vercel.app";
+    // 8c: carry the per-action charge amount inside the fulfilment email.
+    const chargeNote =
+      outcome === "card" ? `You were charged $${total.toFixed(2)} to your card on file.` :
+      outcome === "balance" ? `$${total.toFixed(2)} was deducted from your account balance.` :
+      outcome === "credit" ? `This was covered by one ${input.action.toLowerCase()} credit.` :
+      null;
     const tpl = mailboxEmail(event, {
       name: customer.name,
       serial: piece.serial,
       sender: piece.sender,
       portalUrl: `${base}/dashboard`,
       tracking: input.action === "Forward" ? input.tracking : undefined,
+      chargeNote,
     });
     await notify({
       to: customer.email,

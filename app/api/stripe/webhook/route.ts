@@ -3,12 +3,62 @@ import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { stripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notify } from "@/lib/email";
+import { paymentEmail, type PaymentEvent } from "@/lib/email-templates";
 
 // Stripe needs the raw request body + Node runtime for signature verification.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+const siteBase = () => process.env.NEXT_PUBLIC_SITE_URL ?? "https://big-oakland-mail.vercel.app";
+
+/** Load a customer's contact + plan name for payment emails. */
+async function getContact(
+  db: SupabaseClient,
+  customerId: string
+): Promise<{ email: string | null; name: string | null; planName: string | null }> {
+  const { data } = await db
+    .from("customers")
+    .select("email, name, plan:plans(name)")
+    .eq("id", customerId)
+    .maybeSingle();
+  const row = data as { email: string | null; name: string | null; plan: { name: string } | null } | null;
+  return { email: row?.email ?? null, name: row?.name ?? null, planName: row?.plan?.name ?? null };
+}
+
+/** Best-effort payment notification. Never throws into the webhook handler. */
+async function sendPayment(
+  db: SupabaseClient,
+  customerId: string,
+  event: PaymentEvent,
+  dedupeKey: string,
+  extra: { amount?: number; packName?: string; credits?: number; serviceType?: string; periodLabel?: string; itemsOver?: number } = {}
+) {
+  try {
+    const c = await getContact(db, customerId);
+    if (!c.email) return;
+    const tpl = paymentEmail(event, {
+      name: c.name,
+      planName: c.planName,
+      portalUrl: `${siteBase()}/dashboard`,
+      billingUrl: `${siteBase()}/dashboard/billing`,
+      ...extra,
+    });
+    await notify({
+      to: c.email,
+      dedupeKey,
+      event,
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+      customerId,
+    });
+  } catch (err) {
+    console.error("sendPayment failed", event, err);
+  }
+}
 
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
@@ -123,6 +173,8 @@ async function onCheckoutCompleted(db: SupabaseClient, session: Stripe.Checkout.
         default_payment_method: defaultPm,
       })
       .eq("id", customerId);
+    // Welcome email (once per customer).
+    await sendPayment(db, customerId, "welcome", `welcome:${customerId}`);
     return;
   }
 
@@ -169,6 +221,14 @@ async function onCheckoutCompleted(db: SupabaseClient, session: Stripe.Checkout.
       });
     }
     await db.from("billing_history").insert(rows);
+
+    // Pack purchase receipt.
+    await sendPayment(db, customerId, "pack_purchased", `pack:${session.id}`, {
+      amount: round2(Number(pkg.price) + taxDollars),
+      packName: pkg.name,
+      credits: grant,
+      serviceType: pkg.service_type,
+    });
 
     // Keep the card on file as the default for off-session per-action charges.
     if (pi) {
@@ -236,6 +296,10 @@ async function onInvoicePaid(db: SupabaseClient, invoice: Stripe.Invoice) {
     .from("customers")
     .update({ subscription_status: "active" })
     .eq("id", customerId);
+
+  await sendPayment(db, customerId, "subscription_paid", `invoice_paid:${invoice.id}`, {
+    amount: round2(invoice.total / 100),
+  });
 }
 
 async function onInvoiceFailed(db: SupabaseClient, invoice: Stripe.Invoice) {
@@ -246,6 +310,8 @@ async function onInvoiceFailed(db: SupabaseClient, invoice: Stripe.Invoice) {
     .from("customers")
     .update({ subscription_status: "past_due" })
     .eq("id", customerId);
+
+  await sendPayment(db, customerId, "payment_failed", `invoice_failed:${invoice.id}`);
 }
 
 async function onChargeRefunded(db: SupabaseClient, charge: Stripe.Charge) {

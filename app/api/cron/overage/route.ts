@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe, toCents } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { overageCost, type Plan } from "@/lib/pricing";
+import { notify } from "@/lib/email";
+import { paymentEmail } from "@/lib/email-templates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
     db.from("plans").select("*"),
     db
       .from("customers")
-      .select("id, plan_id, stripe_customer_id, subscription_status")
+      .select("id, plan_id, stripe_customer_id, subscription_status, email, name")
       .not("plan_id", "is", null),
     db
       .from("mail_pieces")
@@ -84,6 +86,29 @@ export async function GET(req: NextRequest) {
       source: "invoice",
       description: `Overage — ${used - plan.included_items} items over ${plan.name} (${periodLabel})`,
     });
+
+    // 8c: notify the customer when an overage was actually billed to their invoice.
+    if (billed && c.email) {
+      const base = process.env.NEXT_PUBLIC_SITE_URL ?? "https://big-oakland-mail.vercel.app";
+      const tpl = paymentEmail("overage_charged", {
+        name: c.name,
+        portalUrl: `${base}/dashboard`,
+        billingUrl: `${base}/dashboard/billing`,
+        amount: overage,
+        itemsOver: used - plan.included_items,
+        planName: plan.name,
+        periodLabel,
+      });
+      await notify({
+        to: c.email,
+        dedupeKey: `overage:${c.id}:${periodLabel}`,
+        event: "overage_charged",
+        subject: tpl.subject,
+        html: tpl.html,
+        text: tpl.text,
+        customerId: c.id,
+      }).catch((err) => console.error("overage email failed", c.id, err));
+    }
 
     results.push({ customer_id: c.id, used, overage, billed, note });
   }
