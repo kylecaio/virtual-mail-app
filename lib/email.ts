@@ -105,6 +105,8 @@ export async function notify(params: NotifyParams): Promise<NotifyResult> {
     status: "sending",
     customer_id: params.customerId != null ? String(params.customerId) : null,
     metadata: params.metadata ?? null,
+    subject: params.subject,
+    body_html: html, // stored so admins can resend from the email log (8e)
   });
 
   if (claimError) {
