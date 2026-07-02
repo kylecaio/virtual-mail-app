@@ -107,6 +107,7 @@ export async function GET(req: NextRequest) {
         html: tpl.html,
         text: tpl.text,
         customerId: c.id,
+        pref: "billing",
       }).catch((err) => console.error("overage email failed", c.id, err));
     }
 

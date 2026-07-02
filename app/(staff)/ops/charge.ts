@@ -266,6 +266,7 @@ export async function chargeAndFulfil(input: ChargeInput): Promise<ChargeResult>
       html: tpl.html,
       text: tpl.text,
       customerId: customer.id,
+      pref: "mail",
     });
   }
 

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import DashboardNav from "../DashboardNav";
 import NoMailbox from "../NoMailbox";
 import SettingsForm from "./SettingsForm";
+import PrefsForm from "./PrefsForm";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,19 @@ export default async function SettingsPage() {
       .eq("id", customer.plan_id)
       .maybeSingle();
     plan = (data as any) ?? null;
+  }
+
+  let prefs = { mail: true, requests: true, billing: true, marketing: true };
+  if (customer) {
+    const { data } = await supabase
+      .from("customers")
+      .select("notify_mail, notify_requests, notify_billing, notify_marketing")
+      .eq("id", customer.id)
+      .maybeSingle();
+    if (data) {
+      const d = data as any;
+      prefs = { mail: d.notify_mail, requests: d.notify_requests, billing: d.notify_billing, marketing: d.notify_marketing };
+    }
   }
 
   return (
@@ -54,6 +68,8 @@ export default async function SettingsPage() {
             fullName={profile.full_name}
             forwarding={customer.forwarding_address}
           />
+
+          <PrefsForm initial={prefs} />
         </div>
       )}
     </div>

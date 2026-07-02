@@ -60,6 +60,7 @@ export async function verifyPiece(
       html: tpl.html,
       text: tpl.text,
       customerId,
+      pref: "mail",
     });
   }
 

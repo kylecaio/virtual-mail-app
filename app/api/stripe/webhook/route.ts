@@ -46,6 +46,9 @@ async function sendPayment(
       billingUrl: `${siteBase()}/dashboard/billing`,
       ...extra,
     });
+    // welcome + payment_failed are critical account/payment mail → always send (no pref);
+    // receipts (pack/subscription/overage) respect the billing toggle.
+    const pref = event === "welcome" || event === "payment_failed" ? null : "billing";
     await notify({
       to: c.email,
       dedupeKey,
@@ -54,6 +57,7 @@ async function sendPayment(
       html: tpl.html,
       text: tpl.text,
       customerId,
+      pref,
     });
   } catch (err) {
     console.error("sendPayment failed", event, err);

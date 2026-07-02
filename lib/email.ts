@@ -32,12 +32,30 @@ export type NotifyParams = {
   /** Optional link back to the customer for admin log / debugging. */
   customerId?: number | string | null;
   metadata?: Record<string, unknown> | null;
+  /**
+   * Preference category (8d). When set with a customerId, the send is suppressed
+   * if the customer has that toggle off, and a manage-preferences/unsubscribe
+   * footer is appended. Omit (undefined/null) for critical payment/account mail,
+   * which always sends and carries no unsubscribe link.
+   */
+  pref?: PrefCategory | null;
+};
+
+export type PrefCategory = "mail" | "requests" | "billing" | "marketing";
+
+const PREF_COLUMN: Record<PrefCategory, string> = {
+  mail: "notify_mail",
+  requests: "notify_requests",
+  billing: "notify_billing",
+  marketing: "notify_marketing",
 };
 
 export type NotifyResult =
   | { ok: true; skipped?: false; providerId: string | null }
   | { ok: false; skipped?: false; error: string }
   | { ok: false; skipped: true; reason: string };
+
+const siteBase = () => process.env.NEXT_PUBLIC_SITE_URL ?? "https://big-oakland-mail.vercel.app";
 
 const FROM = () => process.env.EMAIL_FROM ?? "Oakland Mailbox <hello@notifications.oaklandmailbox.com>";
 const REPLY_TO = () => process.env.EMAIL_REPLY_TO ?? undefined;
@@ -55,6 +73,27 @@ function getResend(): Resend | null {
  */
 export async function notify(params: NotifyParams): Promise<NotifyResult> {
   const admin = createAdminClient();
+
+  // 0. Preference gate + unsubscribe footer (8d). Critical mail passes no pref.
+  let html = params.html;
+  let text = params.text;
+  if (params.pref && params.customerId != null) {
+    const col = PREF_COLUMN[params.pref];
+    const { data: cust } = await admin
+      .from("customers")
+      .select(`${col}, unsubscribe_token`)
+      .eq("id", String(params.customerId))
+      .maybeSingle();
+    if (cust && (cust as Record<string, unknown>)[col] === false) {
+      return { ok: false, skipped: true, reason: "pref_off" };
+    }
+    const token = (cust as { unsubscribe_token?: string } | null)?.unsubscribe_token;
+    if (token) {
+      const url = `${siteBase()}/unsubscribe?token=${token}`;
+      html += `<p style="font-size:12px;color:#aaa;margin-top:16px;">Manage email preferences or unsubscribe: <a href="${url}" style="color:#aaa;">${url}</a></p>`;
+      text = `${text ?? ""}\n\nManage email preferences or unsubscribe: ${url}`;
+    }
+  }
 
   // 1. Claim the row. Unique dedupe_key → a duplicate insert conflicts and we skip.
   const { error: claimError } = await admin.from("email_log").insert({
@@ -92,8 +131,8 @@ export async function notify(params: NotifyParams): Promise<NotifyResult> {
       to: params.to,
       replyTo: REPLY_TO(),
       subject: params.subject,
-      html: params.html,
-      text: params.text,
+      html,
+      text,
     });
     if (error) {
       await admin
