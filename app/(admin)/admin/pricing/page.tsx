@@ -1,10 +1,12 @@
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { workedExamples, type Plan, type PricingRule, type ShippingMargin } from "@/lib/pricing";
+import { workedExamples, type Plan, type Package, type PricingRule, type ShippingMargin } from "@/lib/pricing";
 import AdminNav from "../AdminNav";
 import PlanRow from "./PlanRow";
 import RuleRow from "./RuleRow";
 import MarginRow from "./MarginRow";
+import PackageRow from "./PackageRow";
+import PackageCreate from "./PackageCreate";
 
 export const dynamic = "force-dynamic";
 
@@ -17,15 +19,17 @@ export default async function PricingPage() {
   await requireAdmin();
   const supabase = createClient();
 
-  const [{ data: plans }, { data: rules }, { data: margins }] = await Promise.all([
+  const [{ data: plans }, { data: rules }, { data: margins }, { data: packages }] = await Promise.all([
     supabase.from("plans").select("*").order("display_order"),
     supabase.from("pricing_rules").select("*").order("service_type"),
     supabase.from("shipping_margins").select("*").order("carrier").order("service_type"),
+    supabase.from("packages").select("*").order("display_order"),
   ]);
 
   const planList = (plans ?? []) as Plan[];
   const ruleList = (rules ?? []) as PricingRule[];
   const marginList = (margins ?? []) as ShippingMargin[];
+  const packageList = (packages ?? []) as Package[];
   const ex = workedExamples(ruleList, marginList);
 
   const byCarrier = CARRIER_ORDER
@@ -47,13 +51,39 @@ export default async function PricingPage() {
             <thead className="bg-surfaceAlt"><tr>
               <th className={th}>Plan</th><th className={thr}>Monthly $</th><th className={thr}>Annual $</th>
               <th className={thr}>Included</th><th className={thr}>Overage $</th><th className={thr}>Free days</th>
-              <th className={thr}>Order</th><th className={th + " text-center"}>Active</th><th className={th}></th>
+              <th className={thr}>Order</th><th className={th}>Stripe price</th><th className={th + " text-center"}>Active</th><th className={th}></th>
             </tr></thead>
             <tbody className="bg-surface">
               {planList.map((p) => <PlanRow key={p.id} plan={p} />)}
             </tbody>
           </table>
         </div>
+        <p className="mt-2 text-xs text-inkSubtle">The Stripe price id maps each plan to its monthly Stripe Price (created in Stripe). Subscribe Checkout uses it.</p>
+      </section>
+
+      {/* Prepaid packs */}
+      <section className="mb-10">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-inkSubtle">Prepaid credit packs</h2>
+          <PackageCreate />
+        </div>
+        <div className="overflow-x-auto rounded-theme border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-surfaceAlt"><tr>
+              <th className={th}>Name</th><th className={th}>Action type</th><th className={thr}>Qty</th>
+              <th className={thr}>Bonus</th><th className={thr}>Price</th><th className={th}>Stripe price</th>
+              <th className={thr}>Order</th><th className={th + " text-center"}>Active</th><th className={th}></th>
+            </tr></thead>
+            <tbody className="bg-surface">
+              {packageList.length === 0 ? (
+                <tr><td className="px-3 py-4 text-inkMuted" colSpan={9}>No packs yet — create one above.</td></tr>
+              ) : (
+                packageList.map((p) => <PackageRow key={p.id} pkg={p} />)
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-inkSubtle">A pack grants <em>quantity</em> (+ optional bonus) credits of the action type for the price shown. Revenue is recorded when a customer buys the pack; consuming a credit at fulfilment is $0.</p>
       </section>
 
       {/* Pricing rules */}

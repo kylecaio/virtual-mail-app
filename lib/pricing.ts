@@ -35,6 +35,19 @@ export type Plan = {
   free_storage_days: number;
   is_active: boolean;
   display_order: number;
+  stripe_price_id?: string | null;
+};
+
+export type Package = {
+  id: string;
+  name: string;
+  service_type: string;
+  quantity: number;
+  bonus: number;
+  price: number;
+  stripe_price_id: string | null;
+  is_active: boolean;
+  display_order: number;
 };
 
 export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -96,6 +109,50 @@ export function overageCost(plan: Plan, itemsUsed: number): number {
 
 export function salesTaxRate(rules: PricingRule[]): number {
   return Number(ruleOf(rules, "sales_tax")?.base_amount ?? 0) / 100;
+}
+
+// --- Per-action fulfilment charging (Phase 7d) ---------------------------
+
+export type BillableAction = "Scan" | "Forward" | "Shred" | "Recycle" | "Pickup" | "Consolidate";
+
+// The credit ledger key a given action consumes (aligns with packages.service_type).
+// Recycle has no credit type (it's free). Express scans consume the 'express_scan' pool.
+export function creditKeyForAction(action: BillableAction, express = false): string | null {
+  switch (action) {
+    case "Scan": return express ? "express_scan" : "scan";
+    case "Forward": return "forward";
+    case "Shred": return "shred";
+    case "Pickup": return "local_pickup";
+    case "Consolidate": return "consolidation";
+    case "Recycle": return null;
+    default: return null;
+  }
+}
+
+/**
+ * Pre-tax fee for a fulfilment action, computed from the current pricing rows.
+ * Forward is computed separately (needs postage + a carrier margin) via forwardCost.
+ * Pickup is free on Premium/Enterprise plans (per PRICING.md).
+ */
+export function perActionFee(
+  rules: PricingRule[],
+  plan: Plan | null,
+  action: Exclude<BillableAction, "Forward">,
+  opts: { pages?: number; express?: boolean } = {}
+): number {
+  const pages = opts.pages ?? 0;
+  switch (action) {
+    case "Scan": return scanCost(rules, pages, opts.express ?? false);
+    case "Shred": return shredCost(rules, pages);
+    case "Recycle": return 0; // no recycle rule → free
+    case "Pickup": {
+      const base = Number(ruleOf(rules, "local_pickup")?.base_amount ?? 0);
+      const free = !!plan && /premium|enterprise/i.test(plan.name);
+      return free ? 0 : round2(base);
+    }
+    case "Consolidate": return round2(Number(ruleOf(rules, "consolidation")?.base_amount ?? 0));
+    default: return 0;
+  }
 }
 
 // Worked examples straight from PRICING.md, computed live from current rules.

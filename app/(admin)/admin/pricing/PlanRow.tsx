@@ -18,6 +18,7 @@ export default function PlanRow({ plan }: { plan: Plan }) {
     overage_rate: String(plan.overage_rate),
     free_storage_days: String(plan.free_storage_days),
     display_order: String(plan.display_order),
+    stripe_price_id: (plan as any).stripe_price_id ?? "",
     is_active: plan.is_active,
   });
   const [busy, setBusy] = useState(false);
@@ -37,13 +38,14 @@ export default function PlanRow({ plan }: { plan: Plan }) {
       overage_rate: Number(f.overage_rate),
       free_storage_days: parseInt(f.free_storage_days, 10),
       display_order: parseInt(f.display_order, 10),
+      stripe_price_id: f.stripe_price_id.trim() === "" ? null : f.stripe_price_id.trim(),
       is_active: f.is_active,
     };
     const { error } = await supabase.from("plans").update(patch).eq("id", plan.id);
     if (error) { setBusy(false); setErr(error.message); return; }
     await logAudit(supabase, {
       action: "pricing.plan.update", entity: "plans", entity_id: plan.id,
-      detail: { before: { name: plan.name, monthly_price: plan.monthly_price, annual_price: plan.annual_price, included_items: plan.included_items, overage_rate: plan.overage_rate, free_storage_days: plan.free_storage_days, display_order: plan.display_order, is_active: plan.is_active }, after: patch },
+      detail: { before: { name: plan.name, monthly_price: plan.monthly_price, annual_price: plan.annual_price, included_items: plan.included_items, overage_rate: plan.overage_rate, free_storage_days: plan.free_storage_days, display_order: plan.display_order, stripe_price_id: (plan as any).stripe_price_id ?? null, is_active: plan.is_active }, after: patch },
     });
     setBusy(false); setSaved(true);
     router.refresh();
@@ -58,6 +60,7 @@ export default function PlanRow({ plan }: { plan: Plan }) {
       <td className="px-3 py-2"><input className={num} value={f.overage_rate} onChange={set("overage_rate")} inputMode="decimal" /></td>
       <td className="px-3 py-2"><input className={num} value={f.free_storage_days} onChange={set("free_storage_days")} inputMode="numeric" /></td>
       <td className="px-3 py-2"><input className="w-14 rounded-theme border border-border bg-surface px-2 py-1 text-right text-sm outline-none focus:border-accent" value={f.display_order} onChange={set("display_order")} inputMode="numeric" /></td>
+      <td className="px-3 py-2"><input className="w-40 rounded-theme border border-border bg-surface px-2 py-1 font-mono text-xs outline-none focus:border-accent" value={f.stripe_price_id} onChange={set("stripe_price_id")} placeholder="price_…" /></td>
       <td className="px-3 py-2 text-center"><input type="checkbox" checked={f.is_active} onChange={set("is_active")} /></td>
       <td className="px-3 py-2 whitespace-nowrap">
         <button disabled={busy} onClick={save} className="rounded-theme bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accentHover disabled:opacity-50">Save</button>

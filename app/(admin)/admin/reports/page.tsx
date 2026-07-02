@@ -47,7 +47,7 @@ export default async function ReportsPage() {
   const supabase = createClient();
 
   const [{ data: billing }, { data: pieces }, { data: requests }, { data: customers }, { data: plans }] = await Promise.all([
-    supabase.from("billing_history").select("date, amount, type, status").limit(10000),
+    supabase.from("billing_history").select("date, amount, type, status, source").limit(10000),
     supabase.from("mail_pieces").select("received_at, status").limit(10000),
     supabase.from("service_requests").select("type, status, requested_at").limit(10000),
     supabase.from("customers").select("status, plan_id").limit(10000),
@@ -62,11 +62,14 @@ export default async function ReportsPage() {
   const revByMonth = Object.fromEntries(months.map((m) => [m, 0]));
   const netByMonth = Object.fromEntries(months.map((m) => [m, 0]));
   const revByType: Record<string, number> = {};
+  const revBySource: Record<string, number> = {};
   let grossTotal = 0, taxTotal = 0;
   for (const r of bl as any[]) {
     const amt = Number(r.amount) || 0;
+    if (r.status === "Refunded" || r.status === "Waived") continue; // exclude reversed rows from revenue
     grossTotal += amt;
     revByType[r.type] = (revByType[r.type] ?? 0) + amt;
+    revBySource[r.source ?? "unattributed"] = (revBySource[r.source ?? "unattributed"] ?? 0) + amt;
     if (r.type === "Tax") taxTotal += amt;
     const mk = monthKey(r.date);
     if (mk in revByMonth) { revByMonth[mk] += amt; if (r.type !== "Tax") netByMonth[mk] += amt; }
@@ -145,6 +148,17 @@ export default async function ReportsPage() {
         </div>
 
         <div>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-inkSubtle">Revenue by source</h2>
+          <div className="overflow-hidden rounded-theme border border-border">
+            <table className="w-full text-sm"><thead className="bg-surfaceAlt"><tr><th className={th}>Source</th><th className={thr}>Amount</th></tr></thead>
+              <tbody className="bg-surface">
+                {entries(revBySource).map(([k, v]) => <tr key={k} className="border-t border-border"><td className="px-3 py-2 text-ink capitalize">{k}</td><td className="px-3 py-2 text-right text-ink">{money(v)}</td></tr>)}
+                {entries(revBySource).length === 0 && <tr><td colSpan={2} className="px-3 py-6 text-center text-inkSubtle">No billing yet.</td></tr>}
+              </tbody></table>
+          </div>
+        </div>
+
+        <div>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-inkSubtle">Service requests by type</h2>
           <div className="overflow-hidden rounded-theme border border-border">
             <table className="w-full text-sm"><thead className="bg-surfaceAlt"><tr><th className={th}>Type</th><th className={thr}>Count</th></tr></thead>
@@ -178,7 +192,7 @@ export default async function ReportsPage() {
         </div>
       </div>
 
-      <p className="mt-4 text-xs text-inkSubtle">Net of tax excludes the 9.25% sales-tax line. Forwarding postage is billed largely pass-through, so gross includes carrier cost; a true margin split arrives with Stripe billing detail (Phase 7).</p>
+      <p className="mt-4 text-xs text-inkSubtle">Net of tax excludes the 9.25% sales-tax line. Revenue excludes Refunded/Waived rows. Source split (card/balance/invoice/credit) reconciles to billing_history: card = off-session per-action + pack purchases, invoice = subscription renewals, balance = drawn from account balance, credit = prepaid pack consumption ($0 at fulfilment; revenue was booked at purchase).</p>
     </div>
   );
 }
