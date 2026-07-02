@@ -7,15 +7,21 @@ import UnsubForm from "./UnsubForm";
 
 export const dynamic = "force-dynamic";
 
+type UnsubCustomer = {
+  notify_mail: boolean;
+  notify_requests: boolean;
+  notify_billing: boolean;
+  notify_marketing: boolean;
+  email: string | null;
+};
+
 export default async function UnsubscribePage({
   searchParams,
 }: {
   searchParams: { token?: string };
 }) {
   const token = searchParams.token ?? "";
-  let customer:
-    | { notify_mail: boolean; notify_requests: boolean; notify_billing: boolean; notify_marketing: boolean; email: string | null }
-    | null = null;
+  let customer: UnsubCustomer | null = null;
 
   if (token) {
     const admin = createAdminClient();
@@ -24,7 +30,7 @@ export default async function UnsubscribePage({
       .select("notify_mail, notify_requests, notify_billing, notify_marketing, email")
       .eq("unsubscribe_token", token)
       .maybeSingle();
-    customer = (data as typeof customer) ?? null;
+    customer = (data as UnsubCustomer | null) ?? null;
   }
 
   return (
