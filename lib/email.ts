@@ -79,15 +79,17 @@ export async function notify(params: NotifyParams): Promise<NotifyResult> {
   let text = params.text;
   if (params.pref && params.customerId != null) {
     const col = PREF_COLUMN[params.pref];
-    const { data: cust } = await admin
+    // Static select string (a dynamic `${col}` breaks Supabase's select-string typing).
+    const { data } = await admin
       .from("customers")
-      .select(`${col}, unsubscribe_token`)
+      .select("notify_mail, notify_requests, notify_billing, notify_marketing, unsubscribe_token")
       .eq("id", String(params.customerId))
       .maybeSingle();
-    if (cust && (cust as Record<string, unknown>)[col] === false) {
+    const row = (data as Record<string, unknown> | null) ?? null;
+    if (row && row[col] === false) {
       return { ok: false, skipped: true, reason: "pref_off" };
     }
-    const token = (cust as { unsubscribe_token?: string } | null)?.unsubscribe_token;
+    const token = row?.unsubscribe_token as string | undefined;
     if (token) {
       const url = `${siteBase()}/unsubscribe?token=${token}`;
       html += `<p style="font-size:12px;color:#aaa;margin-top:16px;">Manage email preferences or unsubscribe: <a href="${url}" style="color:#aaa;">${url}</a></p>`;
