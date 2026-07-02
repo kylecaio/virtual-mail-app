@@ -127,6 +127,27 @@ export async function POST(req: NextRequest) {
 const asId = (v: string | { id: string } | null | undefined): string | null =>
   typeof v === "string" ? v : v?.id ?? null;
 
+/**
+ * Resolve the default payment method for a subscription. Checkout-created
+ * subscriptions often leave `subscription.default_payment_method` null — the card
+ * lands on the customer's `invoice_settings.default_payment_method` instead — so
+ * fall back to that. Without this, off-session per-action charges find no card.
+ */
+async function resolveDefaultPm(
+  sub: Stripe.Subscription,
+  stripeCustomerId: string | null
+): Promise<string | null> {
+  const fromSub = asId(sub.default_payment_method);
+  if (fromSub) return fromSub;
+  if (stripeCustomerId) {
+    const cust = await stripe.customers.retrieve(stripeCustomerId);
+    if (cust && !(cust as Stripe.DeletedCustomer).deleted) {
+      return asId((cust as Stripe.Customer).invoice_settings?.default_payment_method);
+    }
+  }
+  return null;
+}
+
 /** Resolve our customers.id — prefer the session client_reference_id, else map by stripe_customer_id. */
 async function resolveCustomerId(
   db: SupabaseClient,
@@ -161,7 +182,7 @@ async function onCheckoutCompleted(db: SupabaseClient, session: Stripe.Checkout.
       const sub = await stripe.subscriptions.retrieve(subId);
       status = sub.status;
       periodEnd = new Date(sub.current_period_end * 1000).toISOString();
-      defaultPm = asId(sub.default_payment_method);
+      defaultPm = await resolveDefaultPm(sub, stripeCustomerId);
     }
     await db
       .from("customers")
@@ -244,10 +265,18 @@ async function onCheckoutCompleted(db: SupabaseClient, session: Stripe.Checkout.
   }
 }
 
-async function onSubscriptionChange(db: SupabaseClient, sub: Stripe.Subscription) {
-  const stripeCustomerId = asId(sub.customer);
+async function onSubscriptionChange(db: SupabaseClient, subEvent: Stripe.Subscription) {
+  const stripeCustomerId = asId(subEvent.customer);
   const customerId = await resolveCustomerId(db, { stripeCustomerId });
   if (!customerId) return;
+
+  // Re-fetch the subscription so we write its CURRENT state, not this event's
+  // (possibly stale, out-of-order) snapshot. Fixes the case where an older
+  // `subscription.updated` (status "incomplete") lands after `invoice.paid`
+  // and would otherwise revert the customer to incomplete.
+  const sub = await stripe.subscriptions.retrieve(subEvent.id);
+  const pm = await resolveDefaultPm(sub, stripeCustomerId);
+
   await db
     .from("customers")
     .update({
@@ -255,7 +284,7 @@ async function onSubscriptionChange(db: SupabaseClient, sub: Stripe.Subscription
       stripe_subscription_id: sub.id,
       subscription_status: sub.status,
       current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-      default_payment_method: asId(sub.default_payment_method),
+      default_payment_method: pm,
     })
     .eq("id", customerId);
 }
