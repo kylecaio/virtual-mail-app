@@ -14,6 +14,18 @@ import {
   type ShippingMargin,
 } from "@/lib/pricing";
 import { chargeOffSession, toCents } from "@/lib/stripe";
+import { notify } from "@/lib/email";
+import { mailboxEmail, type MailboxEvent } from "@/lib/email-templates";
+
+// Phase 8b — action → customer-notification event.
+const EVENT_MAP: Record<BillableAction, MailboxEvent> = {
+  Scan: "scanned",
+  Forward: "forwarded",
+  Shred: "shredded",
+  Recycle: "recycled",
+  Pickup: "picked_up",
+  Consolidate: "forwarded",
+};
 
 const STATUS_MAP: Record<BillableAction, string> = {
   Scan: "Scanned",
@@ -50,7 +62,7 @@ export async function chargeAndFulfil(input: ChargeInput): Promise<ChargeResult>
 
   const { data: piece } = await db
     .from("mail_pieces")
-    .select("id, serial, customer_id, status")
+    .select("id, serial, customer_id, status, sender")
     .eq("id", input.pieceId)
     .maybeSingle();
   if (!piece) return { ok: false, error: "Mail piece not found" };
@@ -60,7 +72,7 @@ export async function chargeAndFulfil(input: ChargeInput): Promise<ChargeResult>
     piece.customer_id
       ? db
           .from("customers")
-          .select("id, plan_id, account_balance, stripe_customer_id, default_payment_method")
+          .select("id, plan_id, account_balance, stripe_customer_id, default_payment_method, email, name")
           .eq("id", piece.customer_id)
           .maybeSingle()
       : Promise.resolve({ data: null } as any),
@@ -225,6 +237,28 @@ export async function chargeAndFulfil(input: ChargeInput): Promise<ChargeResult>
       completed_at: now,
       processed_by: profile.id,
       tracking: input.action === "Forward" && input.tracking ? input.tracking : null,
+    });
+  }
+
+  // --- Best-effort customer notification (Phase 8b). Never blocks fulfilment. ---
+  if (customer?.email) {
+    const event = EVENT_MAP[input.action];
+    const base = process.env.NEXT_PUBLIC_SITE_URL ?? "https://big-oakland-mail.vercel.app";
+    const tpl = mailboxEmail(event, {
+      name: customer.name,
+      serial: piece.serial,
+      sender: piece.sender,
+      portalUrl: `${base}/dashboard`,
+      tracking: input.action === "Forward" ? input.tracking : undefined,
+    });
+    await notify({
+      to: customer.email,
+      dedupeKey: `${event}:${piece.id}`,
+      event,
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+      customerId: customer.id,
     });
   }
 

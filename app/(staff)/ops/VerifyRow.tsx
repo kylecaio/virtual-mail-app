@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { verifyPiece, flagException } from "./verify";
 
 type Customer = { id: string; box_number: number; name: string; company: string | null };
 
@@ -13,13 +13,16 @@ export default function VerifyRow({ piece, customers }: { piece: any; customers:
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function update(fields: Record<string, any>) {
+  async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(true); setErr(null);
-    const supabase = createClient();
-    const { error } = await supabase.from("mail_pieces").update(fields).eq("serial", piece.serial);
-    setBusy(false);
-    if (error) { setErr(error.message); return; }
-    router.refresh();
+    try {
+      const res = await fn();
+      if (!res.ok) { setErr(res.error ?? "Failed"); setBusy(false); return; }
+      setBusy(false);
+      router.refresh();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed"); setBusy(false);
+    }
   }
 
   return (
@@ -40,11 +43,11 @@ export default function VerifyRow({ piece, customers }: { piece: any; customers:
       </td>
       <td className="px-4 py-2">
         <div className="flex flex-wrap gap-1.5">
-          <button disabled={busy || !sel} onClick={() => update({ customer_id: sel, status: "Received" })}
+          <button disabled={busy || !sel} onClick={() => run(() => verifyPiece(piece.serial, sel))}
             className="rounded-theme bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accentHover disabled:opacity-50">Verify</button>
-          <button disabled={busy} onClick={() => update({ status: "Address Correction" })}
+          <button disabled={busy} onClick={() => run(() => flagException(piece.serial, "Address Correction"))}
             className="rounded-theme border border-border px-2.5 py-1 text-xs text-inkMuted hover:bg-surfaceAlt disabled:opacity-50">Addr. correction</button>
-          <button disabled={busy} onClick={() => update({ status: "Return to Sender" })}
+          <button disabled={busy} onClick={() => run(() => flagException(piece.serial, "Return to Sender"))}
             className="rounded-theme border border-border px-2.5 py-1 text-xs text-inkMuted hover:bg-surfaceAlt disabled:opacity-50">Return to sender</button>
         </div>
       </td>
