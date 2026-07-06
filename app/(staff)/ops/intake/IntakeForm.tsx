@@ -140,7 +140,7 @@ export default function IntakeForm() {
               value={q}
               onChange={(e) => onQueryChange(e.target.value)}
               placeholder="e.g. Raman, Acme, 512, 1300 Clay St"
-              className={input + " mt-3"}
+              className="mt-3 w-full rounded-theme border-2 border-accent/40 bg-accentSubtle px-4 py-3 text-base text-ink placeholder:text-inkSubtle outline-none focus:border-accent"
             />
             {q.trim().length >= 2 && (
               <div className="mt-2 overflow-hidden rounded-theme border border-border">
