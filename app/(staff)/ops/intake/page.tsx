@@ -1,6 +1,8 @@
 import { requireStaff } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import IntakeForm from "./IntakeForm";
+import EnvelopeThumb from "./EnvelopeThumb";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,21 @@ export default async function IntakePage() {
     .eq("status", "Pending Verification")
     .order("received_at", { ascending: false })
     .limit(25);
+
+  // Sign envelope photos for viewing (private bucket; page is staff-gated).
+  const signed: Record<string, string> = {};
+  const paths = (pieces ?? []).map((p: any) => p.envelope_image).filter(Boolean) as string[];
+  if (paths.length) {
+    try {
+      const admin = createAdminClient();
+      const { data: sig } = await admin.storage.from("envelope-photos").createSignedUrls(paths, 3600);
+      for (const s of sig ?? []) {
+        if (s.path && s.signedUrl) signed[s.path] = s.signedUrl;
+      }
+    } catch {
+      /* if signing is unavailable, thumbnails degrade to "—" */
+    }
+  }
 
   return (
     <div>
@@ -50,7 +67,9 @@ export default async function IntakePage() {
                 <td className="px-4 py-2 text-inkMuted">{p.sender || "—"}</td>
                 <td className="px-4 py-2 text-inkMuted">{p.type || "—"}</td>
                 <td className="px-4 py-2 text-inkMuted">{p.extraction?.boxGuess ?? "—"}</td>
-                <td className="px-4 py-2 text-inkMuted">{p.envelope_image ? "📎" : "—"}</td>
+                <td className="px-4 py-2 text-inkMuted">
+                  <EnvelopeThumb url={p.envelope_image ? (signed[p.envelope_image] ?? null) : null} serial={p.serial} />
+                </td>
                 <td className="px-4 py-2 text-inkSubtle">{fmt(p.received_at)}</td>
               </tr>
             ))}
