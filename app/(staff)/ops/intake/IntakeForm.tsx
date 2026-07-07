@@ -95,23 +95,33 @@ export default function IntakeForm() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
       }
-    } catch {
-      setCameraError("Couldn't open the camera (permission or hardware). Use the photo picker below.");
+    } catch (e) {
+      const name = (e as { name?: string })?.name || "error";
+      setCameraError(`Couldn't open the camera (${name}). Allow camera access for this site (padlock → Site settings), or use the photo picker below.`);
     }
   }
 
   // ---- Piece lifecycle ----
   async function startPiece() {
     setMsg(null);
+    setCaptured(null);
+    setSerial(null);
+    setPhase("live");
+    // Request the camera synchronously within the click gesture — BEFORE any await —
+    // so Safari/iOS don't drop user-activation and reject getUserMedia as "denied".
+    startCamera();
+    // Reserve the serial in parallel.
     setBusy(true);
     const supabase = createClient();
     const { data, error } = await supabase.rpc("reserve_serial");
     setBusy(false);
-    if (error || data == null) { setMsg({ ok: false, text: `Couldn't reserve a serial: ${error?.message ?? "no value"}` }); return; }
+    if (error || data == null) {
+      setMsg({ ok: false, text: `Couldn't reserve a serial: ${error?.message ?? "no value"}` });
+      stopCamera();
+      setPhase("idle");
+      return;
+    }
     setSerial(Number(data));
-    setCaptured(null);
-    setPhase("live");
-    startCamera();
   }
 
   function capturePhoto() {
@@ -323,6 +333,9 @@ export default function IntakeForm() {
                   Use photo picker
                   <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFilePicked} className="hidden" />
                 </label>
+                {cameraError && (
+                  <button onClick={startCamera} className="rounded-theme border border-border px-3 py-2 text-sm text-inkMuted hover:bg-surfaceAlt">Try camera again</button>
+                )}
                 <button onClick={resetPiece} className="rounded-theme border border-border px-3 py-2 text-sm text-inkMuted hover:bg-surfaceAlt">Discard</button>
                 {cameraError && <p className="w-full text-xs text-amber-700">{cameraError}</p>}
               </div>
