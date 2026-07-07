@@ -66,7 +66,9 @@ export default function IntakeForm() {
       const supabase = createClient();
       const { data } = await supabase.rpc("search_customers", { q: v.trim() });
       setSearching(false);
-      setResults((data as Match[]) ?? []);
+      // Most-likely first. The RPC already orders by score desc; sort defensively.
+      const ranked = ((data as Match[]) ?? []).slice().sort((a, b) => b.score - a.score);
+      setResults(ranked);
     }, 250);
   }
   function pick(m: Match) { setSelected(m); setBox(String(m.box_number)); setResults([]); setQ(""); }
@@ -218,7 +220,12 @@ export default function IntakeForm() {
           </div>
         ) : (
           <>
-            <input value={q} onChange={(e) => onQueryChange(e.target.value)} placeholder="e.g. Raman, Acme, 512, 1300 Clay St" className={input + " mt-3"} />
+            <input
+              value={q}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="e.g. Raman, Acme, 512, 1300 Clay St"
+              className="mt-3 w-full rounded-theme border-2 border-accent/40 bg-accentSubtle px-4 py-3 text-base text-ink placeholder:text-inkSubtle outline-none focus:border-accent"
+            />
             {q.trim().length >= 2 && (
               <div className="mt-2 overflow-hidden rounded-theme border border-border">
                 {searching && results.length === 0 ? (
@@ -227,18 +234,46 @@ export default function IntakeForm() {
                   <div className="px-3 py-3 text-xs text-inkSubtle">No match — likely not our mail. Set aside for Return to Sender.</div>
                 ) : (
                   <ul className="divide-y divide-border">
-                    {results.map((m) => (
-                      <li key={m.id}>
-                        <button type="button" onClick={() => pick(m)} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surfaceAlt">
-                          <span>
-                            <span className="text-sm font-medium text-ink">#{m.box_number} · {m.company || m.name}</span>
-                            {m.company && m.name ? <span className="text-xs text-inkSubtle"> · {m.name}</span> : null}
-                            <span className="block text-xs text-inkSubtle">{m.last_activity ? `last active ${m.last_activity}` : "no activity on file"}</span>
-                          </span>
-                          <span className={"shrink-0 rounded-theme px-2 py-0.5 text-xs font-medium " + (STATUS_STYLE[m.status] ?? "bg-gray-200 text-gray-600")}>{m.status}</span>
-                        </button>
-                      </li>
-                    ))}
+                    {results.map((m, i) => {
+                      const inactive = isInactive(m.status);
+                      return (
+                        <li key={m.id}>
+                          <button
+                            type="button"
+                            onClick={() => pick(m)}
+                            className={"block w-full px-3 py-3 text-left hover:bg-surfaceAlt " + (inactive ? "bg-surfaceAlt/40" : "")}
+                          >
+                            {/* Header: box + company/name, top match tag, status badge */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={"text-sm font-semibold " + (inactive ? "text-inkMuted" : "text-ink")}>
+                                  #{m.box_number} · {m.company || m.name}
+                                </span>
+                                {i === 0 && results.length > 1 && (
+                                  <span className="rounded-theme bg-accentSubtle px-1.5 py-0.5 text-[11px] font-medium text-accent">Top match</span>
+                                )}
+                              </div>
+                              <span className={"shrink-0 rounded-theme px-2 py-0.5 text-xs font-medium " + (STATUS_STYLE[m.status] ?? "bg-gray-200 text-gray-600")}>{m.status}</span>
+                            </div>
+
+                            {/* Full card detail */}
+                            {m.company && m.name && <div className="mt-0.5 text-xs text-inkMuted">{m.name}</div>}
+                            <dl className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs text-inkSubtle sm:grid-cols-2">
+                              <div><span className="text-inkMuted">Email:</span> {m.email || "—"}</div>
+                              <div><span className="text-inkMuted">Last active:</span> {m.last_activity || "no activity on file"}</div>
+                              <div className="sm:col-span-2"><span className="text-inkMuted">Forwarding:</span> {m.forwarding_address || "—"}</div>
+                            </dl>
+
+                            {/* Win-back framing on inactive matches */}
+                            {inactive ? (
+                              <div className="mt-1.5 text-xs text-amber-700">Inactive account — mail is “correct,” account is not. Return to sender + flag for win-back.</div>
+                            ) : (
+                              <div className="mt-1.5 text-xs text-inkSubtle">Tap to carry into assignment (box #{m.box_number}).</div>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
